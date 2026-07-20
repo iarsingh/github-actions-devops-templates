@@ -74,7 +74,7 @@ jobs:
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry-run && steps.bump.outputs.new_tag != '' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.bump.outputs.new_tag }}
           name: ${{ steps.bump.outputs.new_tag }}
