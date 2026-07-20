@@ -1,0 +1,109 @@
+name: Reusable Python CI
+
+# Reusable Python CI workflow.
+# Consumers call this via `uses:` and pass their own matrix / working directory.
+# Stages: Checkout -> Setup Python (pip cache) -> Lint -> Unit test + coverage -> Upload coverage artifact.
+
+on:
+  workflow_call:
+    inputs:
+      python-version-matrix:
+        description: 'JSON array of Python versions to test against, e.g. ["3.11","3.12"].'
+        type: string
+        required: false
+        default: '["3.11", "3.12"]'
+      working-directory:
+        description: 'Directory containing the Python project (where pyproject.toml / requirements live).'
+        type: string
+        required: false
+        default: '.'
+      lint-tool:
+        description: 'Linter to run: "ruff" or "flake8".'
+        type: string
+        required: false
+        default: 'ruff'
+      test-command:
+        description: 'Command used to run the test suite. Coverage flags are appended by default when using pytest.'
+        type: string
+        required: false
+        default: 'pytest --cov=. --cov-report=xml --cov-report=term-missing'
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+      requirements-file:
+        description: 'Optional path (relative to working-directory) to a pip requirements file to install.'
+        type: string
+        required: false
+        default: 'requirements.txt'
+    secrets:
+      CODECOV_TOKEN:
+        description: 'Optional Codecov upload token. When omitted the Codecov upload step is skipped.'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  python-ci:
+    name: Python CI (py${{ matrix.python-version }})
+    runs-on: ${{ inputs.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-version-matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "${{ inputs.requirements-file }}" ]; then
+            pip install -r "${{ inputs.requirements-file }}"
+          fi
+          if [ -f pyproject.toml ]; then
+            pip install -e ".[dev]" || pip install -e . || true
+          fi
+          pip install "${{ inputs.lint-tool }}" pytest pytest-cov
+
+      - name: Lint (${{ inputs.lint-tool }})
+        run: |
+          if [ "${{ inputs.lint-tool }}" = "ruff" ]; then
+            ruff check .
+          else
+            flake8 .
+          fi
+
+      - name: Run tests with coverage
+        run: ${{ inputs.test-command }}
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: ${{ inputs.working-directory }}/coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload coverage to Codecov
+        if: ${{ env.HAS_CODECOV_TOKEN == 'true' }}
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ inputs.working-directory }}/coverage.xml
+          flags: py${{ matrix.python-version }}
+          fail_ci_if_error: false

@@ -1,0 +1,106 @@
+name: Reusable Node CI
+
+# Reusable Node.js CI workflow.
+# Stages: Checkout -> Setup Node (npm cache) -> Install -> Lint -> Test -> Build.
+
+on:
+  workflow_call:
+    inputs:
+      node-version-matrix:
+        description: 'JSON array of Node versions, e.g. ["18","20"].'
+        type: string
+        required: false
+        default: '["18", "20"]'
+      working-directory:
+        description: 'Directory containing package.json.'
+        type: string
+        required: false
+        default: '.'
+      package-manager:
+        description: 'Package manager to use: "npm", "yarn" or "pnpm".'
+        type: string
+        required: false
+        default: 'npm'
+      lint-command:
+        description: 'Lint command to run.'
+        type: string
+        required: false
+        default: 'npm run lint'
+      test-command:
+        description: 'Test command to run.'
+        type: string
+        required: false
+        default: 'npm test'
+      build-command:
+        description: 'Build command to run.'
+        type: string
+        required: false
+        default: 'npm run build'
+      upload-build-artifact:
+        description: 'Whether to upload the build output directory as an artifact.'
+        type: boolean
+        required: false
+        default: false
+      build-artifact-path:
+        description: 'Path to the build output to upload when upload-build-artifact is true.'
+        type: string
+        required: false
+        default: 'dist'
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+permissions:
+  contents: read
+
+jobs:
+  node-ci:
+    name: Node CI (node${{ matrix.node-version }})
+    runs-on: ${{ inputs.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ${{ fromJSON(inputs.node-version-matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm ci
+          elif [ "${{ inputs.package-manager }}" = "yarn" ]; then
+            yarn install --frozen-lockfile
+          else
+            corepack enable && pnpm install --frozen-lockfile
+          fi
+
+      - name: Lint
+        run: ${{ inputs.lint-command }}
+
+      - name: Test
+        run: ${{ inputs.test-command }}
+
+      - name: Build
+        run: ${{ inputs.build-command }}
+
+      - name: Upload build artifact
+        if: ${{ inputs.upload-build-artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-node${{ matrix.node-version }}
+          path: ${{ inputs.working-directory }}/${{ inputs.build-artifact-path }}
+          if-no-files-found: warn
+          retention-days: 7

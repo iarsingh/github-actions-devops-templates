@@ -1,0 +1,121 @@
+name: Reusable Terraform CI
+
+# Reusable Terraform CI workflow.
+# Stages: Checkout -> (optional OIDC auth) -> fmt check -> init -> validate -> tflint -> IaC scan (checkov|tfsec) -> plan.
+# Cloud auth uses OIDC / Workload Identity Federation only -- no static credentials.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Directory containing the Terraform root module.'
+        type: string
+        required: false
+        default: '.'
+      terraform-version:
+        description: 'Terraform version to install.'
+        type: string
+        required: false
+        default: '1.9.5'
+      scanner:
+        description: 'Static IaC scanner to run: "checkov" or "tfsec".'
+        type: string
+        required: false
+        default: 'checkov'
+      run-plan:
+        description: 'Whether to run `terraform plan`. Requires backend/cloud access via OIDC.'
+        type: boolean
+        required: false
+        default: true
+      gcp-workload-identity-provider:
+        description: 'Full resource name of the GCP Workload Identity Provider for OIDC auth. Leave empty to skip GCP auth.'
+        type: string
+        required: false
+        default: ''
+      gcp-service-account:
+        description: 'GCP service account email to impersonate via OIDC. Required when gcp-workload-identity-provider is set.'
+        type: string
+        required: false
+        default: ''
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+permissions:
+  contents: read
+  id-token: write        # required for OIDC auth to the cloud provider
+  pull-requests: write   # required to post the plan summary as a PR comment
+  security-events: write # required to upload scanner SARIF
+
+jobs:
+  terraform-ci:
+    name: Terraform CI
+    runs-on: ${{ inputs.runs-on }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (OIDC / WIF)
+        if: ${{ inputs.gcp-workload-identity-provider != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+          service_account: ${{ inputs.gcp-service-account }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -input=false ${{ inputs.run-plan == false && '-backend=false' || '' }}
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint --format compact
+
+      - name: Run Checkov
+        if: ${{ inputs.scanner == 'checkov' }}
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ inputs.working-directory }}
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: false
+
+      - name: Run tfsec
+        if: ${{ inputs.scanner == 'tfsec' }}
+        uses: aquasecurity/tfsec-sarif-action@v0.1.4
+        with:
+          working_directory: ${{ inputs.working-directory }}
+          sarif_file: tfsec.sarif
+
+      - name: Upload scanner SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ inputs.working-directory }}/${{ inputs.scanner == 'checkov' && 'checkov.sarif' || 'tfsec.sarif' }}
+          category: terraform-${{ inputs.scanner }}
+        continue-on-error: true
+
+      - name: Terraform plan
+        if: ${{ inputs.run-plan }}
+        run: terraform plan -input=false -no-color -out=tfplan
