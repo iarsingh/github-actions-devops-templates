@@ -1,0 +1,182 @@
+name: Reusable Deploy to GKE
+
+# Reusable GKE deployment workflow.
+# Auth uses OIDC / Workload Identity Federation only -- no static service-account JSON keys.
+# Stages: OIDC auth -> gcloud + gke-gcloud-auth-plugin -> get cluster credentials ->
+#         helm upgrade --install -> smoke test (retried curl) -> rollback on failure.
+
+on:
+  workflow_call:
+    inputs:
+      gcp-workload-identity-provider:
+        description: 'Full resource name of the GCP Workload Identity Provider used for OIDC.'
+        type: string
+        required: true
+      gcp-service-account:
+        description: 'GCP service account email to impersonate via OIDC (least privilege: deploy-only).'
+        type: string
+        required: true
+      gcp-project-id:
+        description: 'GCP project ID that owns the GKE cluster.'
+        type: string
+        required: true
+      cluster-name:
+        description: 'Target GKE cluster name.'
+        type: string
+        required: true
+      cluster-location:
+        description: 'GKE cluster location (region or zone), e.g. europe-west1.'
+        type: string
+        required: true
+      release-name:
+        description: 'Helm release name.'
+        type: string
+        required: true
+      chart-path:
+        description: 'Path to the Helm chart (local path or repo/chart reference).'
+        type: string
+        required: true
+      namespace:
+        description: 'Kubernetes namespace to deploy into.'
+        type: string
+        required: false
+        default: 'default'
+      image:
+        description: 'Fully-qualified image reference (name:tag or name@digest) to deploy.'
+        type: string
+        required: true
+      values-file:
+        description: 'Optional path to an extra Helm values file.'
+        type: string
+        required: false
+        default: ''
+      image-values-key:
+        description: 'Helm value key to set with the image reference (dot-path passed to --set).'
+        type: string
+        required: false
+        default: 'image.repository'
+      health-check-url:
+        description: 'URL to curl for the post-deploy smoke test.'
+        type: string
+        required: true
+      health-check-retries:
+        description: 'Number of smoke-test attempts before declaring failure.'
+        type: number
+        required: false
+        default: 10
+      helm-timeout:
+        description: 'Timeout passed to `helm upgrade --install --wait`.'
+        type: string
+        required: false
+        default: '5m'
+      environment:
+        description: 'GitHub environment name to associate the deploy job with (drives approvals / protection rules).'
+        type: string
+        required: false
+        default: ''
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+permissions:
+  contents: read
+  id-token: write   # required for OIDC auth to GCP
+
+jobs:
+  deploy:
+    name: Deploy to GKE
+    runs-on: ${{ inputs.runs-on }}
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (OIDC / WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+          service_account: ${{ inputs.gcp-service-account }}
+
+      - name: Set up gcloud (with gke-gcloud-auth-plugin)
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ inputs.gcp-project-id }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ inputs.cluster-name }}
+          location: ${{ inputs.cluster-location }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
+
+      - name: Helm upgrade --install
+        id: deploy
+        run: |
+          set -euo pipefail
+          EXTRA_VALUES=()
+          if [ -n "${{ inputs.values-file }}" ]; then
+            EXTRA_VALUES+=(--values "${{ inputs.values-file }}")
+          fi
+          IMAGE_REF="${{ inputs.image }}"
+          IMAGE_REPO="${IMAGE_REF%%:*}"
+          IMAGE_TAG="${IMAGE_REF##*:}"
+          helm upgrade --install "${{ inputs.release-name }}" "${{ inputs.chart-path }}" \
+            --namespace "${{ inputs.namespace }}" \
+            --create-namespace \
+            --set "${{ inputs.image-values-key }}=${IMAGE_REPO}" \
+            --set "image.tag=${IMAGE_TAG}" \
+            "${EXTRA_VALUES[@]}" \
+            --wait \
+            --timeout "${{ inputs.helm-timeout }}"
+
+      - name: Smoke test (retried health check)
+        id: smoke
+        run: |
+          set -uo pipefail
+          URL="${{ inputs.health-check-url }}"
+          RETRIES=${{ inputs.health-check-retries }}
+          echo "Probing ${URL} up to ${RETRIES} times..."
+          for i in $(seq 1 "${RETRIES}"); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${URL}" || echo "000")
+            echo "Attempt ${i}/${RETRIES}: HTTP ${CODE}"
+            if [ "${CODE}" = "200" ]; then
+              echo "Smoke test passed."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Smoke test failed after ${RETRIES} attempts."
+          exit 1
+
+      - name: Rollback on failure
+        if: failure() && steps.deploy.outcome == 'success'
+        run: |
+          echo "::warning::Deploy or smoke test failed -- rolling back Helm release '${{ inputs.release-name }}'."
+          helm rollback "${{ inputs.release-name }}" 0 \
+            --namespace "${{ inputs.namespace }}" \
+            --wait \
+            --timeout "${{ inputs.helm-timeout }}"
+          echo "Rollback to previous revision completed."
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## GKE Deployment Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Release | ${{ inputs.release-name }} |"
+            echo "| Namespace | ${{ inputs.namespace }} |"
+            echo "| Cluster | ${{ inputs.cluster-name }} (${{ inputs.cluster-location }}) |"
+            echo "| Image | ${{ inputs.image }} |"
+            echo "| Deploy outcome | ${{ steps.deploy.outcome }} |"
+            echo "| Smoke test outcome | ${{ steps.smoke.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

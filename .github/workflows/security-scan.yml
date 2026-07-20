@@ -1,0 +1,148 @@
+name: Reusable Security Scan
+
+# Reusable security scanning workflow.
+# Runs: Trivy filesystem scan, Gitleaks secret scan, CodeQL SAST, and (optionally) a Trivy image scan.
+# All findings are uploaded to the GitHub code-scanning (Security) tab as SARIF.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Directory to scan for the filesystem/dependency scan.'
+        type: string
+        required: false
+        default: '.'
+      run-codeql:
+        description: 'Whether to run CodeQL SAST analysis.'
+        type: boolean
+        required: false
+        default: true
+      codeql-languages:
+        description: 'JSON array of CodeQL languages, e.g. ["python"] or ["javascript-typescript"].'
+        type: string
+        required: false
+        default: '["python"]'
+      scan-image:
+        description: 'Whether to run a Trivy container image scan. Requires image-ref.'
+        type: boolean
+        required: false
+        default: false
+      image-ref:
+        description: 'Container image reference to scan when scan-image is true, e.g. ghcr.io/org/app:sha-abc123.'
+        type: string
+        required: false
+        default: ''
+      severity:
+        description: 'Comma-separated Trivy severities that count as findings.'
+        type: string
+        required: false
+        default: 'CRITICAL,HIGH'
+      fail-on-findings:
+        description: 'When true, Trivy fails the job on findings at or above `severity`. When false it reports only.'
+        type: boolean
+        required: false
+        default: false
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+permissions:
+  contents: read
+  security-events: write  # required to upload SARIF to code scanning
+
+jobs:
+  trivy-fs:
+    name: Trivy filesystem scan
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ inputs.working-directory }}
+          format: sarif
+          output: trivy-fs.sarif
+          severity: ${{ inputs.severity }}
+          exit-code: ${{ inputs.fail-on-findings && '1' || '0' }}
+          ignore-unfixed: true
+
+      - name: Upload Trivy filesystem SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  gitleaks:
+    name: Gitleaks secret scan
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+
+  codeql:
+    name: CodeQL SAST
+    if: ${{ inputs.run-codeql }}
+    runs-on: ${{ inputs.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.codeql-languages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+
+  trivy-image:
+    name: Trivy image scan
+    if: ${{ inputs.scan-image }}
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Validate image-ref provided
+        run: |
+          if [ -z "${{ inputs.image-ref }}" ]; then
+            echo "::error::scan-image is true but image-ref was not provided."
+            exit 1
+          fi
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ inputs.image-ref }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: ${{ inputs.severity }}
+          exit-code: ${{ inputs.fail-on-findings && '1' || '0' }}
+          ignore-unfixed: true
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
