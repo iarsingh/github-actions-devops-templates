@@ -1,0 +1,90 @@
+# Example CALLER workflow: a full application CI/CD pipeline that chains the reusable
+# workflows together with a `needs:` graph.
+#
+#   python-ci ──► docker-build ──► security-scan ──► deploy (staging) ──► deploy (production, gated)
+#
+# The production deploy is gated by a GitHub Environment named "production" whose
+# protection rules (required reviewers) act as the manual approval gate.
+name: App CI/CD
+
+on:
+  push:
+    branches: [main]
+
+# Permissions must be granted at the caller level; reusable workflows cannot widen them.
+permissions:
+  contents: read
+  packages: write         # docker-build push to GHCR
+  id-token: write         # OIDC auth to GCP in deploy-gke
+  security-events: write  # SARIF upload in security-scan
+
+concurrency:
+  group: app-ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 1) Lint + unit test + coverage
+  ci:
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/python-ci.yml@main
+    with:
+      python-version-matrix: '["3.12"]'
+      lint-tool: ruff
+
+  # 2) Build & push the container image; exposes image tag + digest as outputs
+  build:
+    needs: ci
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/docker-build.yml@main
+    with:
+      image-name: ghcr.io/iarsingh/sample-app
+      context: .
+      dockerfile: Dockerfile
+      platforms: linux/amd64
+      push: true
+      registry: ghcr.io
+
+  # 3) Scan the built image + run SAST/secret scanning
+  security:
+    needs: build
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/security-scan.yml@main
+    with:
+      run-codeql: true
+      codeql-languages: '["python"]'
+      scan-image: true
+      image-ref: ${{ needs.build.outputs.image-tag }}
+      severity: 'CRITICAL,HIGH'
+      fail-on-findings: false
+
+  # 4) Deploy to staging (no approval gate)
+  deploy-staging:
+    needs: [build, security]
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/deploy-gke.yml@main
+    with:
+      environment: staging
+      gcp-workload-identity-provider: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      gcp-service-account: gke-deployer@my-project.iam.gserviceaccount.com
+      gcp-project-id: my-project
+      cluster-name: platform-staging
+      cluster-location: europe-west1
+      release-name: sample-app
+      chart-path: ./charts/sample-app
+      namespace: sample-app
+      image: ${{ needs.build.outputs.image-tag }}
+      health-check-url: https://staging.sample-app.example.com/healthz
+
+  # 5) Deploy to production -- gated by the "production" environment protection rules
+  deploy-production:
+    needs: [build, deploy-staging]
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/deploy-gke.yml@main
+    with:
+      environment: production
+      gcp-workload-identity-provider: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      gcp-service-account: gke-deployer@my-project.iam.gserviceaccount.com
+      gcp-project-id: my-project
+      cluster-name: platform-production
+      cluster-location: europe-west1
+      release-name: sample-app
+      chart-path: ./charts/sample-app
+      namespace: sample-app
+      image: ${{ needs.build.outputs.image-tag }}
+      health-check-url: https://sample-app.example.com/healthz
+      health-check-retries: 15

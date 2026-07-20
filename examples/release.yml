@@ -1,0 +1,19 @@
+# Example CALLER workflow for cutting a release from Conventional Commits on main.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/release.yml@main
+    with:
+      release-branch: main
+      tag-prefix: v
+      default-bump: patch
+      prerelease: false
+      dry-run: false

@@ -1,0 +1,18 @@
+# Example CALLER workflow for a downstream Node.js service repo.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  node-ci:
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/node-ci.yml@main
+    with:
+      node-version-matrix: '["18", "20"]'
+      package-manager: npm
+      build-command: 'npm run build'
+      upload-build-artifact: true
+      build-artifact-path: dist

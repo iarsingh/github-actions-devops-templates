@@ -1,0 +1,26 @@
+# Example CALLER workflow for a downstream Terraform / infrastructure repo.
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# id-token needed at the caller level too so the reusable workflow can mint an OIDC token.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  terraform:
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/terraform-ci.yml@main
+    with:
+      working-directory: environments/staging
+      terraform-version: 1.9.5
+      scanner: checkov
+      run-plan: true
+      gcp-workload-identity-provider: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      gcp-service-account: terraform-plan@my-project.iam.gserviceaccount.com

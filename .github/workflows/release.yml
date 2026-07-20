@@ -1,0 +1,94 @@
+name: Reusable Release
+
+# Reusable release workflow.
+# Computes the next semantic version from Conventional Commits, generates a changelog,
+# creates/pushes the git tag, and publishes a GitHub Release with generated notes.
+
+on:
+  workflow_call:
+    inputs:
+      release-branch:
+        description: 'Branch that releases are cut from.'
+        type: string
+        required: false
+        default: 'main'
+      tag-prefix:
+        description: 'Prefix for version tags, e.g. "v" produces v1.2.3.'
+        type: string
+        required: false
+        default: 'v'
+      default-bump:
+        description: 'Bump applied when no conventional-commit signal is found: patch|minor|major.'
+        type: string
+        required: false
+        default: 'patch'
+      prerelease:
+        description: 'Whether to mark the GitHub Release as a prerelease.'
+        type: boolean
+        required: false
+        default: false
+      dry-run:
+        description: 'When true, compute the next version and changelog but do not tag or publish.'
+        type: boolean
+        required: false
+        default: false
+      runs-on:
+        description: 'Runner label(s) to execute on.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+    outputs:
+      new-version:
+        description: 'The computed next version (without prefix), e.g. 1.4.0.'
+        value: ${{ jobs.release.outputs.new-version }}
+      new-tag:
+        description: 'The created tag, e.g. v1.4.0.'
+        value: ${{ jobs.release.outputs.new-tag }}
+
+permissions:
+  contents: write   # required to push tags and create releases
+
+jobs:
+  release:
+    name: Tag & release
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      new-version: ${{ steps.bump.outputs.new_version }}
+      new-tag: ${{ steps.bump.outputs.new_tag }}
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release-branch }}
+
+      - name: Compute next semantic version
+        id: bump
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ github.token }}
+          default_bump: ${{ inputs.default-bump }}
+          tag_prefix: ${{ inputs.tag-prefix }}
+          release_branches: ${{ inputs.release-branch }}
+          dry_run: ${{ inputs.dry-run }}
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry-run && steps.bump.outputs.new_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: ${{ steps.bump.outputs.new_tag }}
+          body: ${{ steps.bump.outputs.changelog }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+
+      - name: Release summary
+        if: always()
+        run: |
+          {
+            echo "## Release Summary"
+            echo ""
+            echo "- Next version: \`${{ steps.bump.outputs.new_version }}\`"
+            echo "- Tag: \`${{ steps.bump.outputs.new_tag }}\`"
+            echo "- Dry run: \`${{ inputs.dry-run }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

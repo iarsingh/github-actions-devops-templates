@@ -1,0 +1,35 @@
+# Local tooling / caches
+.actionlint
+actionlint
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+dist/
+npm-debug.log*
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+
+# Security scan outputs
+*.sarif
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,19 @@
+# Example CALLER workflow for a downstream Python service repo.
+# Drop this into `.github/workflows/ci.yml` in your application repository.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-ci:
+    uses: iarsingh/github-actions-devops-templates/.github/workflows/python-ci.yml@main
+    with:
+      python-version-matrix: '["3.11", "3.12"]'
+      working-directory: '.'
+      lint-tool: ruff
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
