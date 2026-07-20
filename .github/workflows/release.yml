@@ -57,7 +57,7 @@ jobs:
       new-tag: ${{ steps.bump.outputs.new_tag }}
     steps:
       - name: Checkout (full history for changelog)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ inputs.release-branch }}
