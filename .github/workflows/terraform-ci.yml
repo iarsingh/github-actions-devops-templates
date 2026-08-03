@@ -93,7 +93,7 @@ jobs:
 
       - name: Run Checkov
         if: ${{ inputs.scanner == 'checkov' }}
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@v12.3114.0
         with:
           directory: ${{ inputs.working-directory }}
           framework: terraform
