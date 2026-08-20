@@ -1,5 +1,9 @@
 # Reusable CI/CD Pipeline Library
 
+<!-- repository-summary -->
+Reusable GitHub Actions workflows for CI, security scanning, container builds, GKE deployments, releases, and rollback.
+<!-- /repository-summary -->
+
 A library of **GitHub Actions reusable workflows** (`on: workflow_call`) that application
 and infrastructure repositories across an organization call into for CI, security scanning,
 container builds, GKE deployment, and releases — with sane defaults, explicit input/secret
