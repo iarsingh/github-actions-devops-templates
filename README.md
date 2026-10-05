@@ -1,5 +1,30 @@
 # Reusable CI/CD Pipeline Library
 
+<!-- project-guide:start -->
+## Project guide
+
+[Project architecture](PROJECT_ARCHITECTURE.md) · [Interview questions and answers](INTERVIEW_QA.md)
+
+Use the architecture document for the component diagram, implementation boundaries, and verification entry points. The interview guide includes source-backed answers and project walkthroughs.
+
+### Implementation map
+
+| Component | Responsibility |
+| --- | --- |
+| [`scripts/bump-release.sh`](scripts/bump-release.sh) | Implementation or supporting configuration |
+| [`scripts/validate-workflows.sh`](scripts/validate-workflows.sh) | Implementation or supporting configuration |
+| [`Makefile`](Makefile) | Implementation or supporting configuration |
+| [`tests/bump-release_test.sh`](tests/bump-release_test.sh) | Executable checks and regression examples |
+| [`.github/workflows/deploy-gke.yml`](.github/workflows/deploy-gke.yml) | GitHub Actions job definitions |
+| [`.github/workflows/docker-build.yml`](.github/workflows/docker-build.yml) | GitHub Actions job definitions |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Project explanations or operating notes |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Project explanations or operating notes |
+| [`README.md`](README.md) | Project explanations or operating notes |
+
+Setup and examples are described in the existing project notes below. Consult the component-specific manifests before assuming a single launch command.
+
+<!-- project-guide:end -->
+
 <!-- repository-summary -->
 Reusable GitHub Actions workflows for CI, security scanning, container builds, GKE deployments, releases, and rollback.
 <!-- /repository-summary -->
