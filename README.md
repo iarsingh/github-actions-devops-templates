@@ -296,3 +296,11 @@ On a smoke-test failure the production job goes red, the **Rollback on failure**
 ## License
 
 [MIT](LICENSE).
+
+## Documentation checks
+
+Project architecture, interview guides, and local source links are checked automatically on pushes and pull requests. Run the same check locally:
+
+```bash
+python3 .github/scripts/validate_project_docs.py
+```
