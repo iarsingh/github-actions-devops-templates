@@ -1,5 +1,12 @@
 # Reusable CI/CD Pipeline Library
 
+## Overview
+
+A library of reusable GitHub Actions workflows (`on: workflow_call`) that service and infrastructure repositories call for CI, security scanning, container builds, GKE deployment, releases and rollback. It addresses pipeline YAML copied into every repo, which drifts, gives uneven security coverage and spreads over-broad permissions. Consumers keep a small caller workflow pinned to a tag, while this library holds Python, Node and Terraform CI, Docker build, security scan, GKE deploy and release jobs with explicit input and secret contracts, OIDC cloud auth, caching and matrix testing.
+
+- **Built with:** GitHub Actions, Shell, Docker, Terraform, GKE, actionlint
+- **Scope:** Workflow library checked with actionlint and shell tests; it has not been run against a live GCP project or GKE cluster and no OIDC or Workload Identity Federation is wired here.
+
 <!-- project-guide:start -->
 ## Project guide
 
