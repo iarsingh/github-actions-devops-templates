@@ -68,7 +68,7 @@ jobs:
           service_account: ${{ inputs.gcp-service-account }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ inputs.terraform-version }}
 
